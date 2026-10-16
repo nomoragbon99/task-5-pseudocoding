@@ -1,0 +1,118 @@
+﻿================================================================================
+PART A1: OWN FUNCTION 2 - ADMIN TOKEN AUTHENTICATION (CONSTANT-TIME COMPARE)
+================================================================================
+
+FUNCTION verifyAdminToken
+INPUTS:
+  - headerValue: Any type, the raw header value received from the HTTP request (e.g., "x-admin-token" or "Authorization")
+  - expectedToken: String, the secret administrator token configured on the server
+OUTPUT:
+  - isAuthorized: Boolean, true if the provided token matches the expected secret, false otherwise
+SIDE EFFECTS:
+  - NONE
+FAILS WHEN:
+  - expectedToken is not text or is empty (server configuration defect)
+  - Crypto subsystem error occurs during hash computation (CALL cryptographic digest (may fail))
+
+--------------------------------------------------------------------------------
+PSEUDOCODE BODY
+--------------------------------------------------------------------------------
+
+1. Validate the server configuration for the expected secret token.
+   IF expectedToken is not text OR expectedToken contains only blank spaces THEN
+     RAISE ERROR "Expected admin token must be a configured non-empty string"
+   OTHERWISE continue.
+
+2. Verify that the incoming header value is a valid text string.
+   IF headerValue is not text THEN
+     RETURN FALSE
+   OTHERWISE continue.
+
+3. Clean leading and trailing blank spaces from headerValue, storing the result as rawToken.
+
+4. Check whether rawToken begins with the standard authorization scheme prefix "Bearer ".
+   IF rawToken begins with "Bearer " THEN
+     Remove the first seven characters ("Bearer ") from rawToken, strip any remaining outer spaces, and store the remainder as cleanedToken
+   OTHERWISE
+     Store rawToken as cleanedToken
+   END IF
+
+5. Verify that the cleaned token is not empty.
+   IF cleanedToken is empty THEN
+     RETURN FALSE
+   OTHERWISE continue.
+
+6. Compute the cryptographic SHA-256 digest of cleanedToken to yield a fixed 32-byte representation.
+   CALL cryptographic digest (may fail) to generate tokenDigest.
+
+7. Compute the cryptographic SHA-256 digest of expectedToken to yield a fixed 32-byte representation.
+   CALL cryptographic digest (may fail) to generate expectedDigest.
+
+8. Perform a constant-time byte-by-byte comparison between tokenDigest and expectedDigest to prevent side-channel timing attacks.
+   CALL timing-safe comparison on tokenDigest and expectedDigest, storing the boolean outcome as matchResult.
+
+9. RETURN matchResult.
+
+--------------------------------------------------------------------------------
+HAND-TRACE TABLES
+--------------------------------------------------------------------------------
+
+Scenario 1: Normal Execution (Valid Bearer Header)
+Inputs:
+  - headerValue: "Bearer secret-adm-999"
+  - expectedToken: "secret-adm-999"
+
+Trace:
++------+---------------------------------+------------------------------------------+-------------------------------------------+
+| Step | Variables & State               | Condition / Logic Evaluated              | Next Action Taken                         |
++------+---------------------------------+------------------------------------------+-------------------------------------------+
+| 1    | expectedToken="secret-adm-999"  | Is empty or non-string? False            | Continue to Step 2                        |
+| 2    | headerValue="Bearer secret-..." | Is text? True                            | Continue to Step 3                        |
+| 3    | rawToken="Bearer secret-adm-999"| Strip whitespace                         | Continue to Step 4                        |
+| 4    | rawToken                        | Starts with "Bearer "? True              | Strip prefix -> cleanedToken=             |
+|      |                                 |                                          | "secret-adm-999"                          |
+| 5    | cleanedToken="secret-adm-999"   | Is empty? False                          | Continue to Step 6                        |
+| 6    | tokenDigest                     | CALL SHA-256("secret-adm-999")           | Yields 32-byte Buffer                     |
+| 7    | expectedDigest                  | CALL SHA-256("secret-adm-999")           | Yields 32-byte Buffer                     |
+| 8    | matchResult                     | CALL timingSafeEqual(tokenDigest, exp)   | Byte comparison identical -> True         |
+| 9    | matchResult=True                | Return result                            | RETURN True                               |
++------+---------------------------------+------------------------------------------+-------------------------------------------+
+Result: Boolean True returned. Request is authenticated.
+
+
+Scenario 2: Edge Case (Invalid Token / Header Mismatch)
+Inputs:
+  - headerValue: "Bearer wrong-token-xyz"
+  - expectedToken: "secret-adm-999"
+
+Trace:
++------+---------------------------------+------------------------------------------+-------------------------------------------+
+| Step | Variables & State               | Condition / Logic Evaluated              | Next Action Taken                         |
++------+---------------------------------+------------------------------------------+-------------------------------------------+
+| 1    | expectedToken="secret-adm-999"  | Is empty or non-string? False            | Continue to Step 2                        |
+| 2    | headerValue="Bearer wrong-..."  | Is text? True                            | Continue to Step 3                        |
+| 3    | rawToken="Bearer wrong-tok..."  | Strip whitespace                         | Continue to Step 4                        |
+| 4    | rawToken                        | Starts with "Bearer "? True              | Strip prefix -> cleanedToken=             |
+|      |                                 |                                          | "wrong-token-xyz"                         |
+| 5    | cleanedToken="wrong-token-xyz"  | Is empty? False                          | Continue to Step 6                        |
+| 6    | tokenDigest                     | CALL SHA-256("wrong-token-xyz")          | Yields 32-byte Buffer                     |
+| 7    | expectedDigest                  | CALL SHA-256("secret-adm-999")           | Yields 32-byte Buffer                     |
+| 8    | matchResult                     | CALL timingSafeEqual(tokenDigest, exp)   | Byte comparison differs -> False          |
+| 9    | matchResult=False               | Return result                            | RETURN False                              |
++------+---------------------------------+------------------------------------------+-------------------------------------------+
+Result: Boolean False returned in constant time without leaking token length or early character matching.
+
+
+Scenario 3: Invalid Input (Server Secret Unconfigured / Empty)
+Inputs:
+  - headerValue: "Bearer secret-adm-999"
+  - expectedToken: "" (empty string)
+
+Trace:
++------+---------------------------------+------------------------------------------+-------------------------------------------+
+| Step | Variables & State               | Condition / Logic Evaluated              | Next Action Taken                         |
++------+---------------------------------+------------------------------------------+-------------------------------------------+
+| 1    | expectedToken=""                | Is text and non-empty? False             | RAISE ERROR "Expected admin token must    |
+|      |                                 | Condition is True                        | be a configured non-empty string"         |
++------+---------------------------------+------------------------------------------+-------------------------------------------+
+Result: Execution halts immediately at Step 1 with Error("Expected admin token must be a configured non-empty string").

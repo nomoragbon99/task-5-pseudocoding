@@ -1,0 +1,179 @@
+﻿================================================================================
+PART A2: OPEN-SOURCE FUNCTION 2 (MEDIUM) - node-postgres escapeLiteral
+================================================================================
+
+ORIGINAL SOURCE SNIPPET
+Package: pg (node-postgres)
+Repository: https://github.com/brianc/node-postgres
+License: MIT License (Copyright 2010 - 2024 Brian Carlson)
+File: packages/pg/lib/client.js
+
+```javascript
+function escapeLiteral(str) {
+  var hasBackslash = false
+  var escaped = '\''
+  for (var i = 0; i < str.length; i++) {
+    var c = str[i]
+    if (c === '\'') {
+      escaped += c + c
+    } else if (c === '\\') {
+      escaped += c + c
+      hasBackslash = true
+    } else {
+      escaped += c
+    }
+  }
+  escaped += '\''
+  if (hasBackslash === true) {
+    escaped = ' E' + escaped
+  }
+  return escaped
+}
+```
+
+--------------------------------------------------------------------------------
+PSEUDOCODE STANDARD HEADER
+--------------------------------------------------------------------------------
+
+FUNCTION escapeLiteral
+INPUTS:
+  - rawText: String, an arbitrary text string to be safely embedded as a SQL string literal in a PostgreSQL query
+OUTPUT:
+  - sqlLiteral: String, a fully escaped and quote-enclosed PostgreSQL SQL literal string safe against injection
+SIDE EFFECTS:
+  - NONE
+FAILS WHEN:
+  - rawText is not a string (attempting to read length or iterate characters aborts with error)
+
+--------------------------------------------------------------------------------
+PSEUDOCODE BODY
+--------------------------------------------------------------------------------
+
+1. Validate the input parameter.
+   IF rawText is not text THEN
+     RAISE ERROR "Invalid input: expected a string"
+   OTHERWISE continue.
+
+2. Initialize a flag named backslashDetected to false to track the presence of escape backslashes.
+
+3. Initialize a text buffer named accumulatedLiteral containing an opening single quotation mark "'".
+
+4. Scan the input text character by character from the first to the last position.
+   FOR EACH character IN rawText:
+     IF character is a single quotation mark "'" THEN
+       Append two single quotation marks "''" to accumulatedLiteral to escape the SQL delimiter
+     OTHERWISE IF character is a backslash "\" THEN
+       Append two backslashes "\\" to accumulatedLiteral to escape the filesystem/regex character
+       Set backslashDetected to true
+     OTHERWISE
+       Append character directly to accumulatedLiteral
+     END IF
+   END FOR
+
+5. Append a closing single quotation mark "'" to accumulatedLiteral.
+
+6. Inspect whether any backslashes were encountered during scanning.
+   IF backslashDetected is true THEN
+     Prepend the PostgreSQL escape literal indicator " E" to the front of accumulatedLiteral
+   OTHERWISE continue.
+
+7. RETURN accumulatedLiteral.
+
+--------------------------------------------------------------------------------
+HAND-TRACE TABLES
+--------------------------------------------------------------------------------
+
+Scenario 1: Normal Execution (Single Quote in Text)
+Inputs:
+  - rawText: "O'Reilly"
+
+Trace:
++------+-----------------------------+----------------------------------------------+-------------------------------------------+
+| Step | Variables & State           | Condition / Logic Evaluated                  | Next Action Taken                         |
++------+-----------------------------+----------------------------------------------+-------------------------------------------+
+| 1    | rawText="O'Reilly"          | Is text? True                                | Continue to Step 2                        |
+| 2    | backslashDetected=false     | Flag initialized                             | Continue to Step 3                        |
+| 3    | accumulatedLiteral="'"      | Opening quote added                          | Continue to Step 4                        |
+| 4.1  | character='O'               | Is quote or backslash? False                 | Append 'O' -> accumulatedLiteral="'O"     |
+| 4.2  | character='''               | Is single quote? True                        | Append "''" -> accumulatedLiteral="'O''"  |
+| 4.3  | character='R'               | Normal character                             | Append 'R' -> accumulatedLiteral="'O''R"  |
+| 4.4  | character='e'               | Normal character                             | Append 'e' -> accumulatedLiteral="'O''Re" |
+| 4.5  | character='i'               | Normal character                             | Append 'i' -> ...                         |
+| 4.6  | character='l'               | Normal character                             | Append 'l' -> ...                         |
+| 4.7  | character='l'               | Normal character                             | Append 'l' -> ...                         |
+| 4.8  | character='y'               | Normal character                             | Append 'y' -> accumulatedLiteral=         |
+|      |                             |                                              | "'O''Reilly"                              |
+| 5    | accumulatedLiteral          | Append closing single quote                  | accumulatedLiteral="'O''Reilly'"          |
+| 6    | backslashDetected=false     | Is backslashDetected true? False             | Do not prepend " E"                       |
+| 7    | accumulatedLiteral          | Return escaped SQL literal                   | RETURN "'O''Reilly'"                      |
++------+-----------------------------+----------------------------------------------+-------------------------------------------+
+Result: Safe SQL string "'O''Reilly'" returned.
+
+
+Scenario 2: Edge Case (String Containing Backslashes)
+Inputs:
+  - rawText: "dir\file"
+
+Trace:
++------+-----------------------------+----------------------------------------------+-------------------------------------------+
+| Step | Variables & State           | Condition / Logic Evaluated                  | Next Action Taken                         |
++------+-----------------------------+----------------------------------------------+-------------------------------------------+
+| 1    | rawText="dir\file"          | Is text? True                                | Continue to Step 2                        |
+| 2    | backslashDetected=false     | Flag initialized                             | Continue to Step 3                        |
+| 3    | accumulatedLiteral="'"      | Opening quote added                          | Continue to Step 4                        |
+| 4.1  | character='d', 'i', 'r'     | Normal characters                            | accumulatedLiteral="'dir"                 |
+| 4.2  | character='\'               | Is backslash? True                           | Append "\\" -> accumulatedLiteral=        |
+|      |                             |                                              | "'dir\\"                                  |
+|      |                             |                                              | Set backslashDetected = true              |
+| 4.3  | character='f', 'i', 'l', 'e'| Normal characters                            | accumulatedLiteral="'dir\\file"           |
+| 5    | accumulatedLiteral          | Append closing single quote                  | accumulatedLiteral="'dir\\file'"          |
+| 6    | backslashDetected=true      | Is backslashDetected true? True!             | Prepend " E" -> accumulatedLiteral=       |
+|      |                             |                                              | " E'dir\\file'"                           |
+| 7    | accumulatedLiteral          | Return escaped SQL literal                   | RETURN " E'dir\\file'"                    |
++------+-----------------------------+----------------------------------------------+-------------------------------------------+
+Result: PostgreSQL escape string " E'dir\\file'" returned with doubled backslash and explicit " E" prefix.
+
+
+Scenario 3: Invalid Input (Non-String Type: null)
+Inputs:
+  - rawText: null
+
+Trace:
++------+-----------------------------+----------------------------------------------+-------------------------------------------+
+| Step | Variables & State           | Condition / Logic Evaluated                  | Next Action Taken                         |
++------+-----------------------------+----------------------------------------------+-------------------------------------------+
+| 1    | rawText=null                | Is text? False                               | RAISE ERROR "Invalid input: expected      |
+|      |                             | Condition is True                            | a string"                                 |
++------+-----------------------------+----------------------------------------------+-------------------------------------------+
+Result: Execution halts immediately at Step 1 with Error("Invalid input: expected a string").
+
+--------------------------------------------------------------------------------
+AI COMPARISON & DISCREPANCY ANALYSIS
+--------------------------------------------------------------------------------
+
+1. AI Explanation Claim:
+   When asked how SQL string escaping works in Node.js, AI assistants usually provide this:
+   "To escape a SQL string literal, wrap it in single quotes and replace every single quote with
+   two single quotes: `'\'' + str.replace(/'/g, "''") + '\''`."
+
+2. Actual Source Code Reality:
+   The actual `node-postgres` implementation explicitly scans for backslashes `\`. When a backslash
+   is detected, it:
+   a. Doubles the backslash (`\\`).
+   b. Marks a state flag `hasBackslash = true`.
+   c. Prepends ` E` to the resulting SQL literal (yielding ` E'...'`).
+
+3. Who Was Correct and Why:
+   THE LIBRARY CODE IS CORRECT; THE AI SUGGESTION CREATES A POTENTIAL SECURITY VULNERABILITY.
+   - Why the AI's naive replacement is dangerous: In PostgreSQL, if the database server's
+     `standard_conforming_strings` parameter is toggled to `off` (or during migrations from legacy
+     Postgres versions), backslashes are treated as escape characters. If an attacker injects a
+     trailing backslash (e.g., `test\`), the naive replacement yields `'test\'`. In a non-conforming
+     PostgreSQL engine, the backslash escapes the closing quote, breaking out of the literal and
+     allowing arbitrary SQL injection!
+   - Why `node-postgres` is robust: By recognizing backslashes and prepending the ` E` literal modifier
+     (PostgreSQL Extended String Literal syntax), `node-postgres` instructs the PostgreSQL query parser
+     to strictly interpret backslashes according to SQL-standard escape rules, neutralizing injection
+     regardless of the server configuration.
+   - Conclusion: AI oversimplifies SQL escaping as a regex one-liner, missing PostgreSQL's dialect-specific
+     ` E'...'` escaping rules that prevent SQL injection.

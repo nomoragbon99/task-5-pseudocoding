@@ -1,0 +1,150 @@
+﻿================================================================================
+PART A1: OWN FUNCTION 1 - ATOMIC JOB CLAIM ROUTINE (SKIP LOCKED)
+================================================================================
+
+FUNCTION claimNextJobs
+INPUTS:
+  - workerId: String, unique identifier of the worker claiming the jobs
+  - batchSize: Integer, maximum number of due jobs to claim in this batch
+  - queue: List of Job Records, the database table or in-memory job queue
+  - currentTime: Timestamp, the current reference time for determining job eligibility
+OUTPUT:
+  - claimedJobs: List of Job Records, the jobs claimed and transitioned to processing status
+SIDE EFFECTS:
+  - WRITE updates the status of claimed jobs from pending or failed to processing
+  - WRITE updates the lockedBy field of claimed jobs to workerId
+  - WRITE updates the startedAt timestamp of claimed jobs to currentTime
+FAILS WHEN:
+  - workerId is empty or contains only whitespace
+  - batchSize is not an integer or is less than 1
+  - Database connection fails during query execution (CALL database query (may fail, may be slow))
+
+--------------------------------------------------------------------------------
+PSEUDOCODE BODY
+--------------------------------------------------------------------------------
+
+1. Validate the worker identifier parameter.
+   IF workerId is not text OR workerId contains only blank spaces THEN
+     RAISE ERROR "workerId must be a non-empty string"
+   OTHERWISE continue.
+
+2. Validate the requested batch size.
+   IF batchSize is not a whole number OR batchSize is less than 1 THEN
+     RAISE ERROR "batchSize must be a positive integer"
+   OTHERWISE continue.
+
+3. Initialize an empty list named candidateJobs to hold runnable jobs.
+
+4. Scan the job queue to find all unlocked jobs that are due for execution.
+   CALL database query (may fail, may be slow) to fetch rows matching criteria:
+   FOR EACH job IN queue:
+     IF (job status is "pending" OR job status is "failed")
+        AND job runAt is before or equal to currentTime
+        AND job lockedBy is empty THEN
+       APPEND job TO candidateJobs
+     OTHERWISE continue.
+   END FOR
+
+5. Sort candidateJobs in ascending order of their scheduled execution time runAt so that the oldest overdue jobs are prioritized.
+
+6. Determine the number of jobs to take as the smaller value between batchSize and the total count of candidateJobs.
+
+7. Slice candidateJobs from the beginning up to the determined count, naming the resulting collection selectedJobs.
+
+8. Initialize an empty list named claimedJobs to store the updated records.
+
+9. Atomically mark each selected job as locked by this worker.
+   FOR EACH job IN selectedJobs:
+     WRITE job status to "processing"
+     WRITE job lockedBy to workerId
+     WRITE job startedAt to currentTime
+     APPEND a copy of job TO claimedJobs
+   END FOR
+
+10. RETURN claimedJobs.
+
+--------------------------------------------------------------------------------
+HAND-TRACE TABLES
+--------------------------------------------------------------------------------
+
+Scenario 1: Normal Execution
+Inputs:
+  - workerId: "worker-prod-1"
+  - batchSize: 2
+  - queue:
+      * Job 1: id="job-1", status="pending", runAt=10:00:00, lockedBy=null
+      * Job 2: id="job-2", status="failed",  runAt=10:01:00, lockedBy=null
+      * Job 3: id="job-3", status="pending", runAt=10:15:00, lockedBy=null
+  - currentTime: 10:05:00
+
+Trace:
++------+---------------------------+----------------------------------------------+-------------------------------------------+
+| Step | Variables & State         | Condition / Logic Evaluated                  | Next Action Taken                         |
++------+---------------------------+----------------------------------------------+-------------------------------------------+
+| 1    | workerId="worker-prod-1"  | Is empty or blank? False                     | Continue to Step 2                        |
+| 2    | batchSize=2               | Is integer >= 1? True                        | Continue to Step 3                        |
+| 3    | candidateJobs=[]          | Initialize accumulator                       | Continue to Step 4                        |
+| 4a   | Current job: Job 1        | status="pending", runAt <= 10:05, unlocked?  | Append Job 1 to candidateJobs             |
+|      |                           | Condition is True                            | candidateJobs=[Job 1]                     |
+| 4b   | Current job: Job 2        | status="failed", runAt <= 10:05, unlocked?   | Append Job 2 to candidateJobs             |
+|      |                           | Condition is True                            | candidateJobs=[Job 1, Job 2]              |
+| 4c   | Current job: Job 3        | runAt (10:15) <= 10:05?                      | Skip Job 3 (not due yet)                  |
+|      |                           | Condition is False                           | candidateJobs=[Job 1, Job 2]              |
+| 5    | candidateJobs             | Sort by runAt ascending                      | Order is [Job 1, Job 2]                   |
+| 6    | countToTake               | min(batchSize=2, candidateJobs.length=2) = 2 | Slice length set to 2                     |
+| 7    | selectedJobs              | Take first 2 elements                        | selectedJobs=[Job 1, Job 2]               |
+| 8    | claimedJobs=[]            | Initialize result list                       | Continue to Step 9                        |
+| 9a   | Processing Job 1          | Apply mutations for worker-prod-1            | WRITE status="processing", lockedBy=      |
+|      |                           |                                              | "worker-prod-1", startedAt=10:05:00       |
+| 9b   | Processing Job 2          | Apply mutations for worker-prod-1            | WRITE status="processing", lockedBy=      |
+|      |                           |                                              | "worker-prod-1", startedAt=10:05:00       |
+| 10   | claimedJobs               | Return claimed items                         | RETURN list containing Job 1 and Job 2    |
++------+---------------------------+----------------------------------------------+-------------------------------------------+
+Result: List of 2 claimed jobs (Job 1, Job 2), both now in "processing" status locked by "worker-prod-1".
+
+
+Scenario 2: Edge Case (No Runnable Jobs Due)
+Inputs:
+  - workerId: "worker-prod-1"
+  - batchSize: 5
+  - queue:
+      * Job 1: id="job-1", status="processing", runAt=09:00:00, lockedBy="worker-other"
+      * Job 2: id="job-2", status="pending",    runAt=11:00:00, lockedBy=null
+  - currentTime: 10:00:00
+
+Trace:
++------+---------------------------+----------------------------------------------+-------------------------------------------+
+| Step | Variables & State         | Condition / Logic Evaluated                  | Next Action Taken                         |
++------+---------------------------+----------------------------------------------+-------------------------------------------+
+| 1    | workerId="worker-prod-1"  | Is empty or blank? False                     | Continue to Step 2                        |
+| 2    | batchSize=5               | Is integer >= 1? True                        | Continue to Step 3                        |
+| 3    | candidateJobs=[]          | Initialize accumulator                       | Continue to Step 4                        |
+| 4a   | Current job: Job 1        | lockedBy is not null ("worker-other")        | Skip Job 1                                |
+|      |                           | Condition is False                           | candidateJobs remains []                  |
+| 4b   | Current job: Job 2        | runAt (11:00) <= 10:00?                      | Skip Job 2 (scheduled for the future)     |
+|      |                           | Condition is False                           | candidateJobs remains []                  |
+| 5    | candidateJobs=[]          | Sort empty list                              | candidateJobs remains []                  |
+| 6    | countToTake               | min(batchSize=5, candidateJobs.length=0) = 0 | Slice length set to 0                     |
+| 7    | selectedJobs=[]           | Slice 0 elements                             | selectedJobs=[]                           |
+| 8    | claimedJobs=[]            | Initialize result list                       | Continue to Step 9                        |
+| 9    | Loop over selectedJobs    | List is empty                                | Loop body does not execute                |
+| 10   | claimedJobs=[]            | Return claimed items                         | RETURN empty list []                      |
++------+---------------------------+----------------------------------------------+-------------------------------------------+
+Result: Empty list [] returned with no database state modifications.
+
+
+Scenario 3: Invalid Input (Empty Worker Identifier)
+Inputs:
+  - workerId: "   " (whitespace string)
+  - batchSize: 2
+  - queue: [Job 1]
+  - currentTime: 10:00:00
+
+Trace:
++------+---------------------------+----------------------------------------------+-------------------------------------------+
+| Step | Variables & State         | Condition / Logic Evaluated                  | Next Action Taken                         |
++------+---------------------------+----------------------------------------------+-------------------------------------------+
+| 1    | workerId="   "            | Is string empty after trimming blank spaces? | RAISE ERROR "workerId must be a           |
+|      |                           | Condition is True                            | non-empty string"                         |
++------+---------------------------+----------------------------------------------+-------------------------------------------+
+Result: Execution aborts immediately at Step 1 with Error("workerId must be a non-empty string"). No database read or write occurs.

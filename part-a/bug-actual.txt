@@ -1,0 +1,54 @@
+﻿================================================================================
+PART A3: PLANTED BUG - ACTUAL BEHAVIOR (BUGGY FUNCTION)
+================================================================================
+
+FUNCTION calculateTieredCommissionBuggy
+INPUTS:
+  - orderTotalMinor: Integer, the total purchase amount represented in minor currency units (e.g., cents)
+  - tier: String, the merchant partner tier level ("standard", "silver", or "gold")
+  - isFirstOrder: Boolean, true if this transaction represents the customer's very first order, false otherwise
+OUTPUT:
+  - commission: Integer, the calculated partner commission amount in minor currency units
+SIDE EFFECTS:
+  - NONE
+FAILS WHEN:
+  - orderTotalMinor is not a whole number or is less than 0
+  - tier is not one of "standard", "silver", or "gold"
+
+--------------------------------------------------------------------------------
+PSEUDOCODE BODY (REFLECTING ACTUAL CODE IMPLEMENTATION)
+--------------------------------------------------------------------------------
+
+1. Validate the order total currency amount.
+   IF orderTotalMinor is not a whole number OR orderTotalMinor is less than 0 THEN
+     RAISE ERROR "orderTotalMinor must be a non-negative integer"
+   OTHERWISE continue.
+
+2. Validate the partner tier name.
+   IF tier is not equal to "standard" AND tier is not equal to "silver" AND tier is not equal to "gold" THEN
+     RAISE ERROR "Invalid tier: " combined with tier
+   OTHERWISE continue.
+
+3. Determine the baseline commission rate based on tier:
+   IF tier is "standard" THEN
+     Set effectiveRate to 0.05
+   OTHERWISE IF tier is "silver" THEN
+     Set effectiveRate to 0.08
+   OTHERWISE IF tier is "gold" THEN
+     Set effectiveRate to 0.12
+   END IF
+
+4. Check whether the order meets or exceeds the high-volume threshold of 10000 minor units ($100.00).
+   IF orderTotalMinor is greater than or equal to 10000 THEN
+     Increase effectiveRate by 0.02
+   OTHERWISE continue.
+
+5. Compute the percentage-based commission amount by multiplying orderTotalMinor by effectiveRate, and rounding the product to the nearest integer.
+   Store the result as commission.
+
+6. [ACTUAL DEFECTIVE STEP] Inspect the first-order status with an inverted logic check.
+   IF isFirstOrder is FALSE THEN
+     Increase commission by 500 minor units ($5.00)
+   OTHERWISE continue.
+
+7. RETURN commission.

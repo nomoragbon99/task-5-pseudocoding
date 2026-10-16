@@ -1,0 +1,112 @@
+﻿================================================================================
+PART B: PROMOTIONAL CHECKOUT DISCOUNT ENGINE PSEUDOCODE
+================================================================================
+
+FUNCTION calculateOrderDiscount
+INPUTS:
+  - orderSubtotalMinor: Integer, the gross order subtotal in minor currency units (cents)
+  - customerId: String, the unique identifier of the customer placing the order
+  - customerOrderCount: Integer, the number of prior completed orders by this customer
+  - orderTimestamp: Timestamp, the date and time when the order is submitted
+  - promoCode: String, the promotional code identifier supplied at checkout
+  - discountType: String, the discount calculation method ("percent" or "fixed")
+  - discountValue: Number, either the percentage rate (for percent type) or fixed deduction in minor units (cents)
+  - minSubtotalMinor: Integer, the minimum subtotal in minor units required to qualify for the discount
+  - maxDiscountMinor: Integer or Empty, optional maximum allowable discount ceiling in minor units for percent discounts
+  - validUntilUtc: Timestamp, the expiration cutoff timestamp for the promotional code
+  - firstOrderOnly: Boolean, flag indicating if the promotion is restricted strictly to new customers
+  - previousRedemptions: List of Strings, collection of customer identifiers who have previously redeemed this code
+OUTPUT:
+  - discountMinor: Integer, the final calculated discount amount in minor currency units (cents), clamped between 0 and orderSubtotalMinor
+SIDE EFFECTS:
+  - NONE
+FAILS WHEN:
+  - orderSubtotalMinor is not a whole number or is less than 0
+  - customerId is empty or not text
+  - customerOrderCount is not a whole number or is less than 0
+  - discountType is neither "percent" nor "fixed"
+  - discountValue is less than or equal to 0, or exceeds 100 for percent discounts
+  - minSubtotalMinor is less than 0
+  - maxDiscountMinor is provided but is less than or equal to 0
+
+--------------------------------------------------------------------------------
+PSEUDOCODE BODY
+--------------------------------------------------------------------------------
+
+1. Validate all incoming order and promotional configuration parameters.
+   IF orderSubtotalMinor is not a whole number OR orderSubtotalMinor is less than 0 THEN
+     RAISE ERROR "orderSubtotalMinor must be a non-negative integer"
+   OTHERWISE continue.
+
+   IF customerId is not text OR customerId contains only whitespace THEN
+     RAISE ERROR "customerId must be a non-empty string"
+   OTHERWISE continue.
+
+   IF customerOrderCount is not a whole number OR customerOrderCount is less than 0 THEN
+     RAISE ERROR "customerOrderCount must be a non-negative integer"
+   OTHERWISE continue.
+
+   IF discountType is not equal to "percent" AND discountType is not equal to "fixed" THEN
+     RAISE ERROR "discountType must be either percent or fixed"
+   OTHERWISE continue.
+
+   IF discountValue is less than or equal to 0 THEN
+     RAISE ERROR "discountValue must be greater than 0"
+   OTHERWISE continue.
+
+   IF discountType is "percent" AND discountValue is greater than 100 THEN
+     RAISE ERROR "discountValue for percent discounts cannot exceed 100"
+   OTHERWISE continue.
+
+   IF minSubtotalMinor is less than 0 THEN
+     RAISE ERROR "minSubtotalMinor cannot be negative"
+   OTHERWISE continue.
+
+   IF maxDiscountMinor is provided AND maxDiscountMinor is less than or equal to 0 THEN
+     RAISE ERROR "maxDiscountMinor must be greater than 0 when specified"
+   OTHERWISE continue.
+
+2. Check the single-use per customer restriction.
+   FOR EACH redeemedCustomerId IN previousRedemptions:
+     IF redeemedCustomerId is equal to customerId THEN
+       RETURN 0
+     OTHERWISE continue.
+   END FOR
+
+3. Check promotional code expiration.
+   IF orderTimestamp is greater than or equal to validUntilUtc THEN
+     RETURN 0
+   OTHERWISE continue.
+
+4. Check the first-order-only qualification rule.
+   IF firstOrderOnly is TRUE AND customerOrderCount is greater than 0 THEN
+     RETURN 0
+   OTHERWISE continue.
+
+5. Enforce the minimum order subtotal spend threshold.
+   IF orderSubtotalMinor is strictly less than minSubtotalMinor THEN
+     RETURN 0
+   OTHERWISE continue.
+
+6. Compute the raw discount amount based on the promotional discount type.
+   IF discountType is "fixed" THEN
+     Set rawDiscount to discountValue
+   OTHERWISE IF discountType is "percent" THEN
+     Compute the percentage fraction by dividing discountValue by 100
+     Multiply orderSubtotalMinor by the percentage fraction
+     Round the resulting product to the nearest whole integer, storing it as percentageDiscount
+     IF maxDiscountMinor is provided AND percentageDiscount is greater than maxDiscountMinor THEN
+       Set rawDiscount to maxDiscountMinor
+     OTHERWISE
+       Set rawDiscount to percentageDiscount
+     END IF
+   END IF
+
+7. Clamp the raw discount so the final order total never drops below zero.
+   IF rawDiscount is greater than orderSubtotalMinor THEN
+     Set finalDiscount to orderSubtotalMinor
+   OTHERWISE
+     Set finalDiscount to rawDiscount
+   END IF
+
+8. RETURN finalDiscount.

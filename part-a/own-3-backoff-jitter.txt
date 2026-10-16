@@ -1,0 +1,140 @@
+﻿================================================================================
+PART A1: OWN FUNCTION 3 - EXPONENTIAL BACKOFF WITH EQUAL JITTER
+================================================================================
+
+FUNCTION calculateExponentialBackoffWithJitter
+INPUTS:
+  - attempt: Integer, the retry attempt index (starting from 1)
+  - baseMs: Number, base retry delay duration in milliseconds
+  - capMs: Number, maximum ceiling limit for delay duration in milliseconds
+  - randomFraction: Number, pseudo-random float value between 0.0 inclusive and 1.0 exclusive
+OUTPUT:
+  - delayMs: Integer, computed backoff delay duration in milliseconds
+SIDE EFFECTS:
+  - NONE
+FAILS WHEN:
+  - attempt is not a whole number or is less than 1
+  - baseMs is not a positive number or is not finite
+  - capMs is less than baseMs or is not finite
+  - randomFraction is less than 0.0 or greater than or equal to 1.0
+
+--------------------------------------------------------------------------------
+PSEUDOCODE BODY
+--------------------------------------------------------------------------------
+
+1. Validate the retry attempt counter.
+   IF attempt is not a whole number OR attempt is less than 1 THEN
+     RAISE ERROR "Attempt must be an integer greater than or equal to 1"
+   OTHERWISE continue.
+
+2. Validate the base backoff duration.
+   IF baseMs is not a valid number OR baseMs is less than or equal to 0 THEN
+     RAISE ERROR "baseMs must be greater than 0"
+   OTHERWISE continue.
+
+3. Validate the cap duration against the base duration.
+   IF capMs is not a valid number OR capMs is less than baseMs THEN
+     RAISE ERROR "capMs must be greater than or equal to baseMs"
+   OTHERWISE continue.
+
+4. Validate the pseudo-random factor.
+   IF randomFraction is less than 0.0 OR randomFraction is greater than or equal to 1.0 THEN
+     RAISE ERROR "randomFraction must be between 0 (inclusive) and 1 (exclusive)"
+   OTHERWISE continue.
+
+5. Compute the exponential scaling multiplier by raising the base number 2 to the power of (attempt minus 1).
+   Store the result as multiplier.
+
+6. Compute the uncapped exponential duration by multiplying baseMs by multiplier.
+   Store the result as uncappedDelay.
+
+7. Bound the exponential duration by selecting the smaller value between capMs and uncappedDelay.
+   Store the result as exponentialDelay.
+
+8. Determine the deterministic half of the bounded duration by dividing exponentialDelay by 2.
+   Store the result as halfDelay.
+
+9. Determine the random jitter portion by multiplying halfDelay by randomFraction.
+   Store the result as jitterPortion.
+
+10. Combine the deterministic half and the jitter portion to obtain the total raw delay.
+    Store the sum of halfDelay and jitterPortion as totalDelay.
+
+11. Round totalDelay to the nearest whole integer.
+    Store the result as delayMs.
+
+12. RETURN delayMs.
+
+--------------------------------------------------------------------------------
+HAND-TRACE TABLES
+--------------------------------------------------------------------------------
+
+Scenario 1: Normal Execution (Attempt 3, Random Fraction 0.5)
+Inputs:
+  - attempt: 3
+  - baseMs: 1000
+  - capMs: 30000
+  - randomFraction: 0.5
+
+Trace:
++------+-------------------------------+--------------------------------------------+-------------------------------------------+
+| Step | Variables & State             | Condition / Logic Evaluated                | Next Action Taken                         |
++------+-------------------------------+--------------------------------------------+-------------------------------------------+
+| 1    | attempt=3                     | Is integer >= 1? True                      | Continue to Step 2                        |
+| 2    | baseMs=1000                   | Is number > 0? True                        | Continue to Step 3                        |
+| 3    | capMs=30000                   | Is capMs >= baseMs? True (30000 >= 1000)   | Continue to Step 4                        |
+| 4    | randomFraction=0.5            | Is 0.0 <= randomFraction < 1.0? True       | Continue to Step 5                        |
+| 5    | multiplier                    | 2 ^ (3 - 1) = 2 ^ 2 = 4                    | multiplier = 4                            |
+| 6    | uncappedDelay                 | 1000 * 4 = 4000                            | uncappedDelay = 4000                      |
+| 7    | exponentialDelay              | min(30000, 4000) = 4000                    | exponentialDelay = 4000                   |
+| 8    | halfDelay                     | 4000 / 2 = 2000                            | halfDelay = 2000                          |
+| 9    | jitterPortion                 | 2000 * 0.5 = 1000                          | jitterPortion = 1000                      |
+| 10   | totalDelay                    | 2000 + 1000 = 3000                         | totalDelay = 3000                         |
+| 11   | delayMs                       | round(3000) = 3000                         | delayMs = 3000                            |
+| 12   | delayMs=3000                  | Return final delay                         | RETURN 3000                               |
++------+-------------------------------+--------------------------------------------+-------------------------------------------+
+Result: Integer 3000 (milliseconds) returned.
+
+
+Scenario 2: Edge Case (High Attempt Exceeding Cap, Random Fraction 0.0)
+Inputs:
+  - attempt: 10
+  - baseMs: 1000
+  - capMs: 30000
+  - randomFraction: 0.0
+
+Trace:
++------+-------------------------------+--------------------------------------------+-------------------------------------------+
+| Step | Variables & State             | Condition / Logic Evaluated                | Next Action Taken                         |
++------+-------------------------------+--------------------------------------------+-------------------------------------------+
+| 1    | attempt=10                    | Is integer >= 1? True                      | Continue to Step 2                        |
+| 2    | baseMs=1000                   | Is number > 0? True                        | Continue to Step 3                        |
+| 3    | capMs=30000                   | Is capMs >= baseMs? True                   | Continue to Step 4                        |
+| 4    | randomFraction=0.0            | Is 0.0 <= randomFraction < 1.0? True       | Continue to Step 5                        |
+| 5    | multiplier                    | 2 ^ (10 - 1) = 2 ^ 9 = 512                 | multiplier = 512                          |
+| 6    | uncappedDelay                 | 1000 * 512 = 512000                        | uncappedDelay = 512000                    |
+| 7    | exponentialDelay              | min(30000, 512000) = 30000                 | exponentialDelay = 30000 (capped!)        |
+| 8    | halfDelay                     | 30000 / 2 = 15000                          | halfDelay = 15000                         |
+| 9    | jitterPortion                 | 15000 * 0.0 = 0                            | jitterPortion = 0                         |
+| 10   | totalDelay                    | 15000 + 0 = 15000                          | totalDelay = 15000                        |
+| 11   | delayMs                       | round(15000) = 15000                       | delayMs = 15000                           |
+| 12   | delayMs=15000                 | Return final delay                         | RETURN 15000                              |
++------+-------------------------------+--------------------------------------------+-------------------------------------------+
+Result: Integer 15000 (milliseconds) returned.
+
+
+Scenario 3: Invalid Input (Attempt Counter Less Than 1)
+Inputs:
+  - attempt: 0
+  - baseMs: 1000
+  - capMs: 30000
+  - randomFraction: 0.5
+
+Trace:
++------+-------------------------------+--------------------------------------------+-------------------------------------------+
+| Step | Variables & State             | Condition / Logic Evaluated                | Next Action Taken                         |
++------+-------------------------------+--------------------------------------------+-------------------------------------------+
+| 1    | attempt=0                     | Is integer >= 1? False (0 < 1)             | RAISE ERROR "Attempt must be an integer   |
+|      |                               | Condition is False                         | greater than or equal to 1"               |
++------+-------------------------------+--------------------------------------------+-------------------------------------------+
+Result: Execution halts immediately at Step 1 with Error("Attempt must be an integer greater than or equal to 1").
